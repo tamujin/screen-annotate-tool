@@ -1,0 +1,43 @@
+{
+  "name": "screen-annotate-tool",
+  "version": "1.0.0",
+  "description": "A screen annotation tool for Windows",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "vite",
+    "start": "electron .",
+    "electron": "electron .",
+    "build:renderer": "tsc && vite build",
+    "build:main": "tsc -p tsconfig.node.json && vite build -c vite.main.config.ts",
+    "build": "npm run build:renderer && npm run build:main",
+    "package": "npm run build && electron-builder build --win",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tamujin/screen-annotate-tool.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tamujin/screen-annotate-tool/issues"
+  },
+  "homepage": "https://github.com/tamujin/screen-annotate-tool#readme",
+  "dependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.3",
+    "@types/uuid": "^10.0.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "electron": "^36.1.0",
+    "electron-builder": "^26.0.12",
+    "electron-is-dev": "^3.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "uuid": "^11.1.0",
+    "vite": "^6.3.4"
+  }
+}

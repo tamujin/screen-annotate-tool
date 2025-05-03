@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Screen Annotation Tool</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background-color: #f0f0f0;
+      margin: 0;
+    }
+    h1 {
+      color: #333;
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background-color: #357ae8;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      padding: 10px;
+      background-color: #e0e0e0;
+      align-items: center;
+    }
+    .canvas-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    .color-swatch {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: inline-block;
+      margin: 0 5px;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+    .color-swatch.active {
+      border-color: black;
+    }
+    .tools {
+      display: flex;
+      gap: 10px;
+    }
+    .tool {
+      padding: 5px 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .tool.active {
+      background-color: #d0e5ff;
+      border-color: #4a90e2;
+    }
+    .screen-selector {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      padding: 20px;
+      justify-content: center;
+    }
+    .screen-item {
+      border: 2px solid transparent;
+      border-radius: 4px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .screen-item:hover {
+      border-color: #4a90e2;
+    }
+    .screen-item img {
+      max-width: 320px;
+      height: auto;
+    }
+    .screen-item p {
+      text-align: center;
+      margin: 5px 0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="screenSelector" class="screen-selector">
+      <h1>Select a screen to capture</h1>
+      <div id="sourcesList"></div>
+    </div>
+    
+    <div id="annotationEditor" style="display: none;" class="container">
+      <div class="toolbar">
+        <button id="backButton">← Back</button>
+        
+        <div class="tools">
+          <div class="tool active" data-tool="arrow">➡️ Arrow (A)</div>
+          <div class="tool" data-tool="circle">⭕ Circle (C)</div>
+          <div class="tool" data-tool="rectangle">🔲 Rectangle (R)</div>
+          <div class="tool" data-tool="text">🔤 Text (T)</div>
+        </div>
+        
+        <div class="colors">
+          <span>Colors:</span>
+          <div class="color-swatch active" style="background-color: #ff0000;" data-color="#ff0000" data-key="1"></div>
+          <div class="color-swatch" style="background-color: #00ff00;" data-color="#00ff00" data-key="2"></div>
+          <div class="color-swatch" style="background-color: #0000ff;" data-color="#0000ff" data-key="3"></div>
+          <div class="color-swatch" style="background-color: #ffff00;" data-color="#ffff00" data-key="4"></div>
+        </div>
+        
+        <button id="clearButton">Clear All</button>
+        <button id="saveButton">Save (Ctrl+S)</button>
+        
+        <div style="margin-left: auto; font-size: 12px;">
+          A: Arrow | C: Circle | R: Rectangle | T: Text | 1-4: Colors | Ctrl+Z: Undo
+        </div>
+      </div>
+      
+      <div class="canvas-container">
+        <img id="capturedImage" style="position: absolute; width: 100%; height: 100%; object-fit: contain;" />
+        <canvas id="annotationCanvas" style="position: absolute; width: 100%; height: 100%; object-fit: contain;"></canvas>
+      </div>
+      
+      <div id="status" style="padding: 5px 10px; background-color: #e0e0e0; font-size: 12px;">
+        Ready
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const electron = window.require('electron');
+      
+      // Elements
+      const screenSelector = document.getElementById('screenSelector');
+      const sourcesList = document.getElementById('sourcesList');
+      const annotationEditor = document.getElementById('annotationEditor');
+      const backButton = document.getElementById('backButton');
+      const capturedImage = document.getElementById('capturedImage');
+      const annotationCanvas = document.getElementById('annotationCanvas');
+      const clearButton = document.getElementById('clearButton');
+      const saveButton = document.getElementById('saveButton');
+      const statusEl = document.getElementById('status');
+      const tools = document.querySelectorAll('.tool');
+      const colorSwatches = document.querySelectorAll('.color-swatch');
+      
+      // State
+      let activeTool = 'arrow';
+      let activeColor = '#ff0000';
+      let annotations = [];
+      let currentAnnotation = null;
+      let isDrawing = false;
+      let selectedSource = null;
+      
+      // Get available screen sources
+      async function getSources() {
+        try {
+          const sources = await electron.ipcRenderer.invoke('get-screen-sources');
+          console.log('Sources:', sources);
+          
+          // Populate screen sources
+          sourcesList.innerHTML = '';
+          sources.forEach(source => {
+            const sourceEl = document.createElement('div');
+            sourceEl.className = 'screen-item';
+            sourceEl.innerHTML = `
+              <img src="${source.thumbnail.toDataURL()}" />
+              <p>${source.name}</p>
+            `;
+            sourceEl.addEventListener('click', () => {
+              selectSource(source);
+            });
+            sourcesList.appendChild(sourceEl);
+          });
+        } catch (error) {
+          console.error('Error getting sources:', error);
+          statusEl.textContent = 'Error getting screen sources';
+        }
+      }
+      
+      // Select a source to capture
+      async function selectSource(source) {
+        selectedSource = source;
+        
+        // Capture the screen
+        try {
+          // Create a video element to capture the screen
+          const video = document.createElement('video');
+          video.autoplay = true;
+          video.style.display = 'none';
+          document.body.appendChild(video);
+
+          // Get the stream from the selected source
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: source.id,
+              }
+            }
+          });
+
+          video.srcObject = stream;
+
+          // Wait for the video to load metadata
+          video.onloadedmetadata = () => {
+            // Create a canvas to draw the video frame
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            
+            if (ctx) {
+              // Draw the current video frame to the canvas
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              
+              // Convert the canvas to a data URL
+              const dataUrl = canvas.toDataURL('image/png');
+              capturedImage.src = dataUrl;
+              
+              // Set up the annotation canvas
+              capturedImage.onload = () => {
+                annotationCanvas.width = capturedImage.naturalWidth;
+                annotationCanvas.height = capturedImage.naturalHeight;
+              };
+              
+              // Stop the stream and clean up
+              stream.getTracks().forEach(track => track.stop());
+              document.body.removeChild(video);
+              
+              // Switch to annotation editor
+              screenSelector.style.display = 'none';
+              annotationEditor.style.display = 'flex';
+            }
+          };
+        } catch (error) {
+          console.error('Error capturing screen:', error);
+          statusEl.textContent = 'Failed to capture screen';
+        }
+      }
+      
+      // Drawing functions
+      function drawAnnotations() {
+        const ctx = annotationCanvas.getContext('2d');
+        if (!ctx) return;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+        
+        // Draw all annotations
+        annotations.forEach(annotation => drawAnnotation(ctx, annotation));
+        
+        // Draw current annotation if drawing
+        if (isDrawing && currentAnnotation) {
+          drawAnnotation(ctx, currentAnnotation);
+        }
+      }
+      
+      function drawAnnotation(ctx, annotation) {
+        const { type, color, startX, startY, endX = startX, endY = startY, text } = annotation;
+        
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 3;
+        
+        switch (type) {
+          case 'arrow':
+            // Draw the line
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+            
+            // Draw the arrowhead
+            const angle = Math.atan2(endY - startY, endX - startX);
+            const headLength = 15;
+            
+            ctx.beginPath();
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(
+              endX - headLength * Math.cos(angle - Math.PI / 7),
+              endY - headLength * Math.sin(angle - Math.PI / 7)
+            );
+            ctx.lineTo(
+              endX - headLength * Math.cos(angle + Math.PI / 7),
+              endY - headLength * Math.sin(angle + Math.PI / 7)
+            );
+            ctx.lineTo(endX, endY);
+            ctx.fill();
+            break;
+            
+          case 'circle':
+            const radius = Math.sqrt(
+              Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2)
+            );
+            ctx.beginPath();
+            ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+            ctx.stroke();
+            break;
+            
+          case 'rectangle':
+            const width = endX - startX;
+            const height = endY - startY;
+            ctx.beginPath();
+            ctx.rect(startX, startY, width, height);
+            ctx.stroke();
+            break;
+            
+          case 'text':
+            if (text) {
+              ctx.font = '16px Arial';
+              ctx.fillText(text, startX, startY);
+            }
+            break;
+        }
+      }
+      
+      // Canvas event handlers
+      annotationCanvas.addEventListener('mousedown', (e) => {
+        const rect = annotationCanvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (annotationCanvas.width / rect.width);
+        const y = (e.clientY - rect.top) * (annotationCanvas.height / rect.height);
+        
+        isDrawing = true;
+        
+        if (activeTool === 'text') {
+          const text = prompt('Enter text:');
+          if (text) {
+            annotations.push({
+              id: Date.now().toString(),
+              type: 'text',
+              color: activeColor,
+              startX: x,
+              startY: y,
+              text
+            });
+            drawAnnotations();
+          }
+          isDrawing = false;
+          return;
+        }
+        
+        currentAnnotation = {
+          id: Date.now().toString(),
+          type: activeTool,
+          color: activeColor,
+          startX: x,
+          startY: y,
+          endX: x,
+          endY: y
+        };
+        
+        drawAnnotations();
+      });
+      
+      annotationCanvas.addEventListener('mousemove', (e) => {
+        if (!isDrawing || !currentAnnotation) return;
+        
+        const rect = annotationCanvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (annotationCanvas.width / rect.width);
+        const y = (e.clientY - rect.top) * (annotationCanvas.height / rect.height);
+        
+        currentAnnotation.endX = x;
+        currentAnnotation.endY = y;
+        
+        drawAnnotations();
+      });
+      
+      annotationCanvas.addEventListener('mouseup', () => {
+        if (isDrawing && currentAnnotation) {
+          annotations.push({ ...currentAnnotation });
+          isDrawing = false;
+          currentAnnotation = null;
+          drawAnnotations();
+        }
+      });
+      
+      annotationCanvas.addEventListener('mouseleave', () => {
+        if (isDrawing && currentAnnotation) {
+          annotations.push({ ...currentAnnotation });
+          isDrawing = false;
+          currentAnnotation = null;
+          drawAnnotations();
+        }
+      });
+      
+      // Button handlers
+      backButton.addEventListener('click', () => {
+        annotationEditor.style.display = 'none';
+        screenSelector.style.display = 'flex';
+        // Clear annotations when going back
+        annotations = [];
+        currentAnnotation = null;
+        isDrawing = false;
+      });
+      
+      clearButton.addEventListener('click', () => {
+        annotations = [];
+        drawAnnotations();
+      });
+      
+      saveButton.addEventListener('click', async () => {
+        // Create a canvas to save the final image
+        const saveCanvas = document.createElement('canvas');
+        saveCanvas.width = annotationCanvas.width;
+        saveCanvas.height = annotationCanvas.height;
+        const ctx = saveCanvas.getContext('2d');
+        
+        if (!ctx) return;
+        
+        // Draw the screenshot
+        const img = new Image();
+        img.src = capturedImage.src;
+        
+        // Wait for image to load
+        await new Promise(resolve => {
+          img.onload = resolve;
+        });
+        
+        // Draw the image and annotations
+        ctx.drawImage(img, 0, 0);
+        annotations.forEach(annotation => drawAnnotation(ctx, annotation));
+        
+        // Convert to data URL
+        const dataUrl = saveCanvas.toDataURL('image/png');
+        
+        try {
+          // Save using Electron
+          const result = await electron.ipcRenderer.invoke('save-screenshot', dataUrl);
+          
+          if (result.success) {
+            statusEl.textContent = `Screenshot saved to ${result.filePath}`;
+          } else {
+            statusEl.textContent = `Failed to save: ${result.error}`;
+          }
+        } catch (error) {
+          console.error('Error saving:', error);
+          statusEl.textContent = 'Error saving the screenshot';
+        }
+      });
+      
+      // Tool selection
+      tools.forEach(tool => {
+        tool.addEventListener('click', () => {
+          tools.forEach(t => t.classList.remove('active'));
+          tool.classList.add('active');
+          activeTool = tool.dataset.tool;
+          statusEl.textContent = `Tool: ${activeTool}`;
+        });
+      });
+      
+      // Color selection
+      colorSwatches.forEach(swatch => {
+        swatch.addEventListener('click', () => {
+          colorSwatches.forEach(s => s.classList.remove('active'));
+          swatch.classList.add('active');
+          activeColor = swatch.dataset.color;
+          statusEl.textContent = `Color: ${activeColor}`;
+        });
+      });
+      
+      // Keyboard shortcuts
+      document.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        
+        // Tool shortcuts
+        if (key === 'a') {
+          tools.forEach(t => t.classList.remove('active'));
+          document.querySelector('[data-tool="arrow"]').classList.add('active');
+          activeTool = 'arrow';
+        }
+        if (key === 'c') {
+          tools.forEach(t => t.classList.remove('active'));
+          document.querySelector('[data-tool="circle"]').classList.add('active');
+          activeTool = 'circle';
+        }
+        if (key === 'r') {
+          tools.forEach(t => t.classList.remove('active'));
+          document.querySelector('[data-tool="rectangle"]').classList.add('active');
+          activeTool = 'rectangle';
+        }
+        if (key === 't') {
+          tools.forEach(t => t.classList.remove('active'));
+          document.querySelector('[data-tool="text"]').classList.add('active');
+          activeTool = 'text';
+        }
+        
+        // Color shortcuts
+        colorSwatches.forEach(swatch => {
+          if (swatch.dataset.key === key) {
+            colorSwatches.forEach(s => s.classList.remove('active'));
+            swatch.classList.add('active');
+            activeColor = swatch.dataset.color;
+          }
+        });
+        
+        // Undo (Ctrl+Z)
+        if (e.ctrlKey && key === 'z') {
+          annotations.pop();
+          drawAnnotations();
+        }
+        
+        // Save (Ctrl+S)
+        if (e.ctrlKey && key === 's') {
+          e.preventDefault();
+          saveButton.click();
+        }
+      });
+      
+      // Initialize
+      getSources();
+    });
+  </script>
+</body>
+</html> 

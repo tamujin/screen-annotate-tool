@@ -1,0 +1,18 @@
+{
+  "appId": "com.screenannotate.app",
+  "productName": "Screen Annotate Tool",
+  "directories": {
+    "output": "dist/electron"
+  },
+  "files": [
+    "dist/renderer/**/*",
+    "dist/main/**/*"
+  ],
+  "win": {
+    "target": "nsis"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  }
+} 
